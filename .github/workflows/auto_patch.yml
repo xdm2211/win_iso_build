@@ -46,7 +46,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 0. Start marker
+      # 0. Cleanup old runs before starting
+      - name: Cleanup old runs
+        if: always() && matrix.version.name == 'Win11 LTSC 2024'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $branch = gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
+          $all = gh run list --workflow "${{ github.workflow }}" --branch $branch --json databaseId,conclusion,createdAt --limit 100 | ConvertFrom-Json
+          $all | Where-Object { $_.conclusion -in @('failure','cancelled','timed_out') } | ForEach-Object { try { gh run delete $_.databaseId --yes 2>$null } catch {} }
+          $all | Where-Object { ((Get-Date) - [DateTime]::Parse($_.createdAt)).TotalMinutes -lt 10 } | ForEach-Object { try { gh run delete $_.databaseId --yes 2>$null } catch {} }
+          $all | Select-Object -Skip 10 | ForEach-Object { try { gh run delete $_.databaseId --yes 2>$null } catch {} }
+          exit 0
+
+      # 1. Start marker
       - name: Start workflow
         shell: pwsh
         run: Write-Host "Starting ${{ matrix.version.name }} Auto Patch workflow"
@@ -56,7 +71,6 @@ jobs:
         id: script
         shell: pwsh
         run: |
-          $ProgressPreference = 'SilentlyContinue'
           function Invoke-RestMethodWithRetry([string]$uri, [int]$maxAttempts=5, [int]$delaySeconds=120) {
             for ($i = 1; $i -le $maxAttempts; $i++) {
               try {
